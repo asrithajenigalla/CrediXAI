@@ -1,711 +1,490 @@
-import streamlit as st
+import json
+import sqlite3
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
-import datetime
-import time
+import streamlit as st
+from io import BytesIO
+from xhtml2pdf import pisa
 
-# --- 1. PAGE CONFIGURATION ---
+# Optional Gemini AI Integration
+try:
+    from google import genai
+    GENAI_AVAILABLE = True
+except ImportError:
+    GENAI_AVAILABLE = False
+
+# ==============================================================================
+# HELPER: STYLED PDF GENERATOR USING XHTML2PDF
+# ==============================================================================
+def create_styled_pdf_bytes(html_content: str) -> bytes:
+    """Converts HTML and CSS into a styled PDF binary byte stream."""
+    result = BytesIO()
+    pisa_status = pisa.CreatePDF(BytesIO(html_content.encode("utf-8")), dest=result)
+    if pisa_status.err:
+        raise Exception("Error rendering HTML to PDF")
+    return result.getvalue()
+
+# ==============================================================================
+# 1. PAGE CONFIGURATION & HIGH-CONTRAST DARK THEME CSS
+# ==============================================================================
 st.set_page_config(
-    page_title="CrediXAI • Next-Gen Credit Scoring Engine",
+    page_title="CrediXAI | End-to-End Lending Engine",
     page_icon="💳",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- 2. HIGH-CONTRAST DARK FINTECH STYLING ---
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700;800&display=swap');
-
-    /* Main Application Container & App View */
-    html, body, [data-testid="stAppViewContainer"], .stApp {
-        font-family: 'Plus Jakarta Sans', sans-serif !important;
-        background-color: #0d1117 !important;
-        color: #f0f6fc !important;
-    }
-
-    /* Force Streamlit Header / Deploy Bar to Dark */
-    header[data-testid="stHeader"] {
-        background-color: #0d1117 !important;
-    }
-    header[data-testid="stHeader"] * {
-        color: #8b949e !important;
-    }
-
-    /* Sidebar Fix */
-    section[data-testid="stSidebar"] {
-        background-color: #161b22 !important;
-        border-right: 1px solid #30363d !important;
-    }
-
-    /* Input Controls, Selectboxes & Sliders */
-    div[data-baseweb="select"] > div, 
-    div[data-baseweb="input"] > div, 
-    input {
-        background-color: #21262d !important;
+    /* 1. Fix Disabled Input Text (Verified Full Name & Identity Number) */
+    .stTextInput input:disabled, 
+    div[data-baseweb="input"] input[disabled] {
         color: #ffffff !important;
-        border-color: #30363d !important;
-    }
-    
-    div[data-widget="stRadio"] label, div[data-widget="stSelectbox"] label {
-        color: #f0f6fc !important;
-        font-weight: 600 !important;
-    }
-
-    /* Data Tables */
-    table {
-        color: #ffffff !important;
+        -webkit-text-fill-color: #ffffff !important;
         background-color: #161b22 !important;
-        border: 1px solid #30363d !important;
-        border-radius: 8px !important;
-        width: 100%;
-    }
-    th {
-        background-color: #21262d !important;
-        color: #58a6ff !important;
-        font-weight: 800 !important;
-        font-size: 14px !important;
-        border-bottom: 2px solid #30363d !important;
-        padding: 12px !important;
-    }
-    td {
-        color: #f0f6fc !important;
-        font-size: 13px !important;
-        border-bottom: 1px solid #30363d !important;
-        padding: 12px !important;
+        opacity: 1 !important;
+        border: 1px solid #484f58 !important;
     }
 
-    /* Text & Headings */
-    label, p, span, h1, h2, h3, h4, h5, h6 {
-        color: #e6edf3 !important;
-    }
-    .stCaption, caption {
-        color: #8b949e !important;
-    }
-
-    /* Cards & Containers */
-    .glass-card {
-        background: #161b22 !important;
-        border: 1px solid #30363d !important;
-        border-radius: 16px;
-        padding: 24px;
-        margin-bottom: 20px;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-    }
-
-    .hero-banner {
-        background: linear-gradient(135deg, #0d4429 0%, #161b22 100%) !important;
-        border: 1px solid #2ea44f !important;
-        border-radius: 18px;
-        padding: 24px;
-        margin-bottom: 25px;
-    }
-
-    .metric-pill {
-        background: rgba(88, 166, 255, 0.15) !important;
-        border: 1px solid rgba(88, 166, 255, 0.4) !important;
-        border-radius: 12px;
-        padding: 14px;
-        text-align: center;
-    }
-    .metric-val {
-        font-size: 26px;
-        font-weight: 800;
-        color: #58a6ff !important;
-    }
-    .metric-lbl {
-        font-size: 11px;
-        color: #c9d1d9 !important;
-        text-transform: uppercase;
-        letter-spacing: 0.8px;
-        font-weight: 700;
-    }
-
-    /* High-Contrast Green Buttons */
-    .stButton>button, div.stDownloadButton>button {
-        background: linear-gradient(90deg, #238636 0%, #2ea44f 100%) !important;
+    /* 2. Fix Executive Summary Card Subtext & Metric Values */
+    [data-testid="stMetricValue"], 
+    [data-testid="stMetricLabel"],
+    [data-testid="stMetricDelta"],
+    [data-testid="stMarkdownContainer"] small,
+    [data-testid="stMarkdownContainer"] caption,
+    div[data-testid="stMetric"] * {
         color: #ffffff !important;
-        font-weight: 700 !important;
-        border: 1px solid #3fb950 !important;
-        border-radius: 10px !important;
-        padding: 12px 24px !important;
-        width: 100%;
-        box-shadow: 0 4px 12px rgba(46, 164, 79, 0.3) !important;
+        opacity: 1 !important;
     }
-
-    .stButton>button:hover, div.stDownloadButton>button:hover {
-        background: linear-gradient(90deg, #2ea44f 0%, #3fb950 100%) !important;
-        color: #ffffff !important;
-    }
-
-    /* Chat Messages */
-    .stChatMessage {
-        background-color: #161b22 !important;
-        border: 1px solid #30363d !important;
-        border-radius: 12px !important;
-    }
-
-    /* --- FIX FOR CHAT INPUT & BOTTOM CONTAINER --- */
-    div[data-testid="stChatInput"] {
-        background-color: #161b22 !important;
-        border: 1px solid #30363d !important;
-        border-radius: 14px !important;
-    }
-
-    div[data-testid="stChatInput"] textarea {
-        background-color: #161b22 !important;
-        color: #ffffff !important;
-    }
-
-    div[data-testid="stChatInput"] textarea::placeholder {
-        color: #8b949e !important;
-    }
-
-    div[data-testid="stBottom"] {
-        background-color: #0d1117 !important;
-    }
-
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. SESSION STATE INITIALIZATION ---
-if 'borrower_db' not in st.session_state:
-    st.session_state.borrower_db = {
-        'APP-9204-IN': {
-            'name': 'Rahul Sharma',
-            'id': 'APP-9204-IN',
-            'category': '🛵 Gig Delivery Partner (Swiggy/Zomato)',
-            'monthly_income': 32000,
-            'upi_count': 78,
-            'utility_status': '100% On-Time (12/12 Months)',
-            'avg_balance': 6500,
-            'monthly_debts': 3000,
-            'platform_rating': 4.85,
-            'aa_verified': True
-        },
-        'APP-8112-IN': {
-            'name': 'Priya Sundaram',
-            'id': 'APP-8112-IN',
-            'category': '🛒 Micro Merchant / Street Vendor',
-            'monthly_income': 48000,
-            'upi_count': 142,
-            'utility_status': '100% On-Time (12/12 Months)',
-            'avg_balance': 18500,
-            'monthly_debts': 4500,
-            'platform_rating': 4.92,
-            'aa_verified': True
-        },
-        'APP-4091-IN': {
-            'name': 'Amit Verma',
-            'id': 'APP-4091-IN',
-            'category': '🚗 Ride-share Driver (Uber/Ola)',
-            'monthly_income': 21000,
-            'upi_count': 32,
-            'utility_status': 'Frequent Delays (>3 Months)',
-            'avg_balance': 1200,
-            'monthly_debts': 8000,
-            'platform_rating': 4.20,
-            'aa_verified': False
-        }
-    }
-
-if 'active_borrower_id' not in st.session_state:
-    st.session_state.active_borrower_id = 'APP-8112-IN'
-
-if 'chat_messages' not in st.session_state:
-    st.session_state.chat_messages = [
-        {"role": "assistant", "content": "Hello! I am **CrediBot**, your Explainable Underwriting AI Assistant. Ask me anything about score calculations, credit recommendations, or RBI compliance!"}
-    ]
-
-active_b = st.session_state.borrower_db[st.session_state.active_borrower_id]
-
-# Dynamic Scoring Engine
-def calculate_score_breakdown(b):
-    base_score = 30
-    inc_pts = min(int(b['monthly_income'] / 1000), 25)
-    upi_pts = min(int(b['upi_count'] / 4), 20)
-    util_pts = 20 if "100%" in b['utility_status'] else (10 if "1-2" in b['utility_status'] else 0)
-    bal_pts = min(int(b['avg_balance'] / 500), 10)
-    rating_pts = int((b['platform_rating'] - 3) * 10) if b['platform_rating'] > 3 else 0
-    debt_pts = -min(int(b['monthly_debts'] / 600), 15)
-
-    total_score = max(15, min(100, base_score + inc_pts + upi_pts + util_pts + bal_pts + rating_pts + debt_pts))
-    
-    return total_score, {
-        'Verified Income': inc_pts,
-        'Utility Continuity': util_pts,
-        'UPI Velocity': upi_pts,
-        'Gig Platform Rating': rating_pts,
-        'Min Account Balance': bal_pts,
-        'Debt Obligations': debt_pts
-    }
-
-def generate_report_html(b, score, recommendation):
-    return f"""
-    <html>
-    <head>
-        <style>
-            body {{ font-family: Arial, sans-serif; margin: 30px; color: #111; }}
-            .header {{ text-align: center; border-bottom: 2px solid #2ea44f; padding-bottom: 10px; }}
-            .section {{ margin-top: 20px; background: #f8f9fa; padding: 15px; border-radius: 8px; }}
-            .metric {{ font-size: 20px; font-weight: bold; color: #0d4429; }}
-            table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
-            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-            th {{ background-color: #2ea44f; color: white; }}
-        </style>
-    </head>
-    <body>
-        <div class="header">
-            <h2>CREDIXAI UNDERWRITING ASSESSMENT REPORT</h2>
-            <p>Official Institutional Record • Generated on {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S IST")}</p>
-        </div>
-        <div class="section">
-            <h3>Applicant Details</h3>
-            <p><b>Name:</b> {b['name']} | <b>ID:</b> {b['id']} | <b>Category:</b> {b['category']}</p>
-            <p><b>AA Consent Verification:</b> {"VERIFIED ACTIVE" if b.get('aa_verified') else "PENDING"}</p>
-        </div>
-        <div class="section">
-            <h3>Underwriting Decision</h3>
-            <p class="metric">Credit Score: {score}/100</p>
-            <p><b>Recommendation:</b> {recommendation}</p>
-        </div>
-        <div class="section">
-            <h3>Financial Signals Overview</h3>
-            <table>
-                <tr><th>Financial Attribute</th><th>Evaluated Value</th></tr>
-                <tr><td>Monthly Income</td><td>₹{b['monthly_income']:,}</td></tr>
-                <tr><td>UPI Transactions</td><td>{b['upi_count']} / month</td></tr>
-                <tr><td>Utility Status</td><td>{b['utility_status']}</td></tr>
-                <tr><td>Average Balance</td><td>₹{b['avg_balance']:,}</td></tr>
-                <tr><td>Debt Obligations</td><td>₹{b['monthly_debts']:,}</td></tr>
-                <tr><td>Platform Rating</td><td>{b['platform_rating']} ⭐</td></tr>
-            </table>
-        </div>
-    </body>
-    </html>
-    """
-
-# --- 4. NAVIGATION SIDEBAR ---
-st.sidebar.markdown("""
-<div style="text-align: center; padding: 10px 0;">
-    <h1 style="color: #58a6ff !important; margin: 0; font-size: 26px; font-weight: 800;">💳 CrediXAI</h1>
-    <span style="color: #3fb950 !important; font-size: 11px; font-weight: 700; letter-spacing: 1.2px;">EXPLAINABLE FINTECH ENGINE</span>
-</div>
-""", unsafe_allow_html=True)
-
-st.sidebar.markdown("---")
-
-selected_applicant_id = st.sidebar.selectbox(
-    "📂 SELECT APPLICANT PROFILE:",
-    options=list(st.session_state.borrower_db.keys()),
-    format_func=lambda x: f"{st.session_state.borrower_db[x]['name']} ({x})"
-)
-st.session_state.active_borrower_id = selected_applicant_id
-active_b = st.session_state.borrower_db[st.session_state.active_borrower_id]
-
-nav_choice = st.sidebar.radio(
-    "SELECT MODULE:",
-    [
-        "🚀 Executive Summary",
-        "👤 Borrower Profile & AA Sync",
-        "📊 Live Credit Assessment & Gauge",
-        "🔍 XAI & What-If Simulator",
-        "🤖 AI Copilot Chatbot",
-        "⚖️ Algorithmic Fairness",
-        "📋 Regulatory Audit Log"
-    ]
-)
-
-st.sidebar.markdown("---")
-st.sidebar.markdown(f"""
-<div style="background: rgba(35, 134, 54, 0.15); border: 1px solid #2ea44f; padding: 14px; border-radius: 12px;">
-    <span style="color: #3fb950 !important; font-weight: 700; font-size: 13px;">🛡️ RBI Data Norms</span>
-    <p style="color: #c9d1d9 !important; font-size: 11px; margin: 5px 0 0 0;">
-        • Account Aggregator: <b>{"ACTIVE ✅" if active_b.get('aa_verified') else "PENDING ⚠️"}</b><br>
-        • Contact Scraping: DISABLED<br>
-        • Media Access: DISABLED
-    </p>
-</div>
-""", unsafe_allow_html=True)
-
-# --- MODULE 1: EXECUTIVE SUMMARY ---
-if nav_choice == "🚀 Executive Summary":
-    st.markdown("""
-    <div class="hero-banner">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div>
-                <h1 style="margin: 0; color: #ffffff !important; font-size: 32px; font-weight: 800;">CrediXAI Platform ⚡</h1>
-                <p style="color: #7ee787 !important; font-size: 16px; margin-top: 6px;">Next-Gen Financial Inclusion for Thin-File & Gig Economy Borrowers</p>
-            </div>
-            <div>
-                <span style="background: rgba(46, 160, 67, 0.25); color: #3fb950 !important; border: 1px solid #2ea44f; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700;">LIVE V2.4 MODEL</span>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.markdown('<div class="metric-pill"><div class="metric-val">0</div><div class="metric-lbl">CIBIL History Needed</div></div>', unsafe_allow_html=True)
-    with c2:
-        st.markdown('<div class="metric-pill"><div class="metric-val">12+</div><div class="metric-lbl">Alt-Cashflow Signals</div></div>', unsafe_allow_html=True)
-    with c3:
-        st.markdown('<div class="metric-pill"><div class="metric-val">100%</div><div class="metric-lbl">SHAP Explainable</div></div>', unsafe_allow_html=True)
-    with c4:
-        st.markdown('<div class="metric-pill"><div class="metric-val">Zero</div><div class="metric-lbl">Privacy Violations</div></div>', unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.markdown("""
-        <div class="glass-card">
-            <h3 style="color: #58a6ff !important; margin-top:0;">🛑 The Unbanked Gap</h3>
-            <p style="color: #e6edf3 !important; font-size: 14px; line-height: 1.6;">
-                Millions of gig workers, street vendors, and micro-freelancers earn regular incomes but are denied traditional credit due to zero credit bureau (CIBIL) history.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-    with col_b:
-        st.markdown("""
-        <div class="glass-card">
-            <h3 style="color: #3fb950 !important; margin-top:0;">⚡ The CrediXAI Solution</h3>
-            <p style="color: #e6edf3 !important; font-size: 14px; line-height: 1.6;">
-                CrediXAI evaluates Account Aggregator (AA) cash-flow signals, digital transaction frequency, utility repayment discipline, and gig platform metrics to safely underwrite loans.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-
-# --- MODULE 2: BORROWER PROFILE & AA SYNC ---
-elif nav_choice == "👤 Borrower Profile & AA Sync":
-    st.markdown("## 👤 Borrower Profile & Account Aggregator Data Sync")
-    st.caption("Manage profile data or trigger instant live consent fetch via RBI Account Aggregator")
-
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.subheader("📲 Account Aggregator (AA) Automated Sync")
-    col_aa1, col_aa2 = st.columns([3, 1])
-    with col_aa1:
-        st.write("Fetch verified bank statements, UPI frequency, and cash-flow data directly from AA network (Finvu/Setu API).")
-    with col_aa2:
-        if st.button("🔗 Connect & Sync via AA"):
-            with st.spinner("Connecting to Account Aggregator Gateway..."):
-                time.sleep(1.2)
-                st.session_state.borrower_db[active_b['id']]['aa_verified'] = True
-                st.session_state.borrower_db[active_b['id']]['monthly_income'] += 2000
-                st.session_state.borrower_db[active_b['id']]['upi_count'] += 15
-                st.session_state.borrower_db[active_b['id']]['avg_balance'] += 1000
-                st.success("✅ Consent Token Verified! Fetched updated bank statement payload.")
-                st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    with st.form("profile_form"):
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        st.subheader("1️⃣ Applicant Identification")
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            name = st.text_input("Applicant Name 👤", active_b['name'])
-        with col2:
-            app_id = st.text_input("Application Identifier 🆔", active_b['id'])
-        with col3:
-            categories = [
-                "🛵 Gig Delivery Partner (Swiggy/Zomato)",
-                "🚗 Ride-share Driver (Uber/Ola)",
-                "🛒 Micro Merchant / Street Vendor",
-                "💻 Freelance Tech/Design Professional",
-                "🛠️ Skilled Service Professional (Urban Company)"
-            ]
-            idx = categories.index(active_b['category']) if active_b['category'] in categories else 0
-            category = st.selectbox("Employment Category 💼", categories, index=idx)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        st.subheader("2️⃣ Financial Cash-Flow & Platform Data")
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            inc = st.number_input("Verified Monthly Income (₹) 💰", value=int(active_b['monthly_income']), step=1000)
-            upi = st.slider("Monthly Digital Transactions (UPI Count) 📲", 0, 200, int(active_b['upi_count']))
-            util_options = [
-                "100% On-Time (12/12 Months)",
-                "1-2 Delayed Payments",
-                "Frequent Delays (>3 Months)"
-            ]
-            u_idx = util_options.index(active_b['utility_status']) if active_b['utility_status'] in util_options else 0
-            utility = st.selectbox("Utility Bill History ⚡", util_options, index=u_idx)
-        with c2:
-            bal = st.number_input("Average Minimum Account Balance (₹) 🏦", value=int(active_b['avg_balance']), step=500)
-            debt = st.number_input("Existing Monthly Debt Obligations (₹) 📉", value=int(active_b['monthly_debts']), step=500)
-            rating = st.slider("Gig Platform Rating (⭐ 1-5)", 1.0, 5.0, float(active_b['platform_rating']), step=0.05)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        submitted = st.form_submit_button("⚡ Save Profile to Database")
-        if submitted:
-            st.session_state.borrower_db[app_id] = {
-                'name': name,
-                'id': app_id,
-                'category': category,
-                'monthly_income': inc,
-                'upi_count': upi,
-                'utility_status': utility,
-                'avg_balance': bal,
-                'monthly_debts': debt,
-                'platform_rating': rating,
-                'aa_verified': active_b.get('aa_verified', False)
-            }
-            st.session_state.active_borrower_id = app_id
-            st.success(f"✅ Profile saved for {name} ({app_id})!")
-            st.rerun()
-
-# --- MODULE 3: LIVE CREDIT ASSESSMENT & GAUGE ---
-elif nav_choice == "📊 Live Credit Assessment & Gauge":
-    st.markdown("## 📊 Underwriting & Dynamic Score Engine")
-    st.caption("Live AI evaluation summary generated for institutional decisioning")
-
-    score, _ = calculate_score_breakdown(active_b)
-
-    if score >= 75:
-        badge_html = '<span style="background: rgba(46, 160, 67, 0.25); color: #3fb950 !important; border: 1px solid #2ea44f; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700;">AUTO-APPROVED ✅</span>'
-        gauge_color = "#3FB950"
-        recommendation = "Approved for Instant Credit Line up to ₹75,000 at 12% APR"
-    elif score >= 50:
-        badge_html = '<span style="background: rgba(210, 153, 34, 0.25); color: #d29922 !important; border: 1px solid #d29922; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700;">MANUAL REVIEW REQUIRED ⚠️</span>'
-        gauge_color = "#D29922"
-        recommendation = "Approved for Capped Micro-Loan of ₹25,000 subject to AA Re-Verification"
-    else:
-        badge_html = '<span style="background:rgba(248,81,73,0.2); color:#f85149 !important; border:1px solid #f85149; padding:6px 14px; border-radius:20px; font-size: 12px; font-weight:700;">DECLINED ❌</span>'
-        gauge_color = "#F85149"
-        recommendation = "Credit Line Declined due to low cash-flow stability and high existing obligations"
-
-    st.markdown(f"""
-    <div style="background: #161b22; border: 1px solid #30363d; border-radius: 16px; padding: 24px; margin-bottom: 25px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #30363d; padding-bottom: 15px; margin-bottom: 20px;">
-            <div>
-                <span style="font-size: 11px; color: #8b949e !important; letter-spacing: 1px; font-weight: 700;">CONFIDENTIAL UNDERWRITING REPORT</span>
-                <h2 style="margin: 4px 0 0 0; color: #ffffff !important; font-weight: 800; font-size: 24px;">{active_b['name']}</h2>
-                <span style="color: #58a6ff !important; font-size: 13px;">ID: {active_b['id']} | Profile: {active_b['category']}</span>
-            </div>
-            <div>{badge_html}</div>
-        </div>
-        <p style="font-size: 15px; color: #e6edf3 !important;"><b>Decision Recommendation:</b> {recommendation}</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    col_chart, col_factors = st.columns([5, 6])
-
-    with col_chart:
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        st.subheader("🎯 Real-Time Score Gauge")
-
-        fig = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=score,
-            domain={'x': [0, 1], 'y': [0, 1]},
-            number={'suffix': "/100", 'font': {'color': gauge_color, 'size': 44, 'family': "Plus Jakarta Sans"}},
-            gauge={
-                'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "#8b949e"},
-                'bar': {'color': gauge_color, 'thickness': 0.25},
-                'bgcolor': "#0d1117",
-                'borderwidth': 1,
-                'bordercolor': "#30363d",
-                'steps': [
-                    {'range': [0, 50], 'color': 'rgba(248,81,73,0.15)'},
-                    {'range': [50, 75], 'color': 'rgba(210,153,34,0.15)'},
-                    {'range': [75, 100], 'color': 'rgba(46,160,67,0.15)'}
-                ]
-            }
-        ))
-        fig.update_layout(
-            height=280,
-            margin=dict(l=20, r=20, t=30, b=20),
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)'
+# ==============================================================================
+# 2. LOCAL SQLITE DATABASE INITIALIZATION
+# ==============================================================================
+def init_db():
+    conn = sqlite3.connect("credixai_demo.db")
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS applicants (
+            id TEXT PRIMARY KEY,
+            name TEXT,
+            category TEXT,
+            pan TEXT,
+            personal_income REAL,
+            family_income REAL,
+            monthly_debts REAL,
+            upi_count INTEGER,
+            utility_status INTEGER,
+            volatility INTEGER
         )
-        st.plotly_chart(fig, use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+    ''')
+    
+    c.execute("SELECT COUNT(*) FROM applicants")
+    if c.fetchone()[0] == 0:
+        sample_data = [
+            ("APP-8112-IN", "Priya Sundaram", "🛒 Micro Merchant / Street Vendor", "XYZPS9876K", 48000.0, 15000.0, 4500.0, 142, 100, 10),
+            ("APP-9204-IN", "Rahul Sharma", "Gig Economy Worker", "ABCDE1234F", 35000.0, 20000.0, 6000.0, 110, 78, 22),
+            ("APP-3341-IN", "Anil Kumar", "Freelancer", "PQRST5543M", 28000.0, 0.0, 4500.0, 45, 65, 38)
+        ]
+        c.executemany("INSERT INTO applicants VALUES (?,?,?,?,?,?,?,?,?,?)", sample_data)
+        conn.commit()
+    conn.close()
 
-    with col_factors:
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        st.subheader("💡 Underwriting Breakdown")
-        st.markdown(f"""
-        * **🟢 Income Cash-Flow:** ₹{active_b['monthly_income']:,}/month verified earnings
-        * **🟢 Digital Velocity:** {active_b['upi_count']} UPI transaction cycles per month
-        * **🟢 Utility Discipline:** {active_b['utility_status']}
-        * **🟢 Gig Platform Performance:** {active_b['platform_rating']} ⭐ overall rating
-        * **🔴 Debt Commitments:** ₹{active_b['monthly_debts']:,}/month active debt
-        """, unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+init_db()
 
-    st.markdown("### 📄 Export Official Assessment")
-    report_data = generate_report_html(active_b, score, recommendation)
-    st.download_button(
-        label="📥 Download Underwriting Report (HTML/PDF)",
-        data=report_data,
-        file_name=f"CrediXAI_Assessment_{active_b['id']}.html",
-        mime="text/html"
-    )
+def get_all_applicants():
+    conn = sqlite3.connect("credixai_demo.db")
+    df = pd.read_sql_query("SELECT * FROM applicants", conn)
+    conn.close()
+    return df
 
-# --- MODULE 4: XAI & WHAT-IF SIMULATOR ---
-elif nav_choice == "🔍 XAI & What-If Simulator":
-    st.markdown("## 🔍 Explainable AI & Interactive Counterfactual Simulator")
-    st.caption("SHAP feature attribution alongside live 'What-If' goal planning")
+def update_applicant_db(app_data):
+    conn = sqlite3.connect("credixai_demo.db")
+    c = conn.cursor()
+    c.execute('''
+        INSERT OR REPLACE INTO applicants VALUES (?,?,?,?,?,?,?,?,?,?)
+    ''', (
+        app_data['id'], app_data['name'], app_data['category'], app_data['pan'],
+        app_data['personal_income'], app_data['family_income'], app_data['monthly_debts'],
+        app_data['upi_count'], app_data['utility_status'], app_data['volatility']
+    ))
+    conn.commit()
+    conn.close()
 
-    score, contributions = calculate_score_breakdown(active_b)
+# ==============================================================================
+# 3. SIDEBAR NAVIGATION & DEMO APPLICANT SELECTOR
+# ==============================================================================
+st.sidebar.title("⚙️ CrediXAI Engine")
 
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.subheader("📊 Dynamic Point Impact Breakdown (+/- Points)")
+st.sidebar.markdown("### 🗄️ Demo Database Switcher")
+df_apps = get_all_applicants()
+selected_app_id = st.sidebar.selectbox("Select Active Applicant", df_apps['id'].tolist(), index=0)
 
-    xai_data = pd.DataFrame({
-        'Alternative Signal': list(contributions.keys()),
-        'Score Impact (Points)': list(contributions.values())
-    }).sort_values(by='Score Impact (Points)', ascending=True)
+active_row = df_apps[df_apps['id'] == selected_app_id].iloc[0].to_dict()
 
-    fig_xai = px.bar(
-        xai_data,
-        x='Score Impact (Points)',
-        y='Alternative Signal',
-        orientation='h',
-        color='Score Impact (Points)',
-        color_continuous_scale=['#f85149', '#d29922', '#3fb950']
-    )
-    fig_xai.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='#ffffff'),
-        height=300,
-        margin=dict(l=10, r=10, t=10, b=10)
-    )
-    st.plotly_chart(fig_xai, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📍 Navigation Menu")
+nav_page = st.sidebar.radio(
+    "Go to Page:",
+    [
+        "📊 Executive Summary",
+        "👤 Borrower Details & Profile",
+        "📱 Application Journey",
+        "⚠️ Deficit & Gap Analyzer",
+        "🧮 FOIR Waterfall Analysis",
+        "📊 Active Loans & Repayments",
+        "🤖 AI Copilot Chatbot"
+    ]
+)
 
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.subheader("🔮 Interactive Counterfactual 'What-If' Goal Simulator")
-    st.caption("Simulate how improving financial behaviors alters the credit score in real time")
+# ==============================================================================
+# 4. UNDERWRITING CALCULATIONS
+# ==============================================================================
+total_household_income = active_row['personal_income'] + active_row['family_income']
+living_expenses = total_household_income * 0.30
+income_after_expenses = total_household_income - living_expenses
+net_disposable_income = max(0, income_after_expenses - active_row['monthly_debts'])
+max_eligible_emi = net_disposable_income * 0.80
 
-    sim_col1, sim_col2 = st.columns(2)
-    with sim_col1:
-        sim_income = st.slider("Simulated Monthly Income (₹)", 10000, 100000, int(active_b['monthly_income']), step=5000)
-        sim_balance = st.slider("Simulated Min Balance (₹)", 500, 50000, int(active_b['avg_balance']), step=1000)
-    with sim_col2:
-        sim_upi = st.slider("Simulated Monthly UPI Count", 0, 200, int(active_b['upi_count']), step=10)
-        sim_debt = st.slider("Simulated Monthly Debt Obligations (₹)", 0, 30000, int(active_b['monthly_debts']), step=1000)
+monthly_r = 14.0 / (12 * 100)
+if max_eligible_emi > 0:
+    max_loan_principal = (max_eligible_emi * (((1 + monthly_r)**12) - 1)) / (monthly_r * ((1 + monthly_r)**12))
+else:
+    max_loan_principal = 0
 
-    sim_borrower = active_b.copy()
-    sim_borrower.update({
-        'monthly_income': sim_income,
-        'avg_balance': sim_balance,
-        'upi_count': sim_upi,
-        'monthly_debts': sim_debt
-    })
-    sim_score, _ = calculate_score_breakdown(sim_borrower)
-    delta = sim_score - score
+def calculate_score_and_deficits(b_data):
+    base = 600
+    deficits = []
+    
+    tot_inc = b_data['personal_income'] + b_data['family_income']
+    dti_val = (b_data['monthly_debts'] / tot_inc) if tot_inc > 0 else 1.0
+    
+    if dti_val > 0.4:
+        deficits.append({
+            "parameter": "High Existing Debt-to-Income (DTI)",
+            "current": f"{round(dti_val * 100, 1)}%",
+            "target": "< 30%",
+            "fix": "Pay off smaller existing loans or declare secondary family co-applicant income."
+        })
+    if b_data['upi_count'] < 60:
+        deficits.append({
+            "parameter": "Low UPI Cashflow Velocity",
+            "current": f"{b_data['upi_count']} txns/mo",
+            "target": "> 80 txns/mo",
+            "fix": "Route regular daily digital transactions through primary UPI handle to increase velocity."
+        })
+    if b_data['utility_status'] < 80:
+        deficits.append({
+            "parameter": "Utility Payment Discipline",
+            "current": f"{b_data['utility_status']}/100",
+            "target": "≥ 85/100",
+            "fix": "Ensure prompt payment of utility bills to claim +40 score points."
+        })
+    if b_data['volatility'] > 25:
+        deficits.append({
+            "parameter": "High Earnings Volatility",
+            "current": f"{b_data['volatility']}%",
+            "target": "< 20%",
+            "fix": "Link verified bank statements covering 6 continuous months to prove consistent income."
+        })
+
+    score = int(np.clip(base + (40 if b_data['utility_status']>=80 else -40) + (30 if b_data['upi_count']>=60 else -30), 300, 900))
+    return score, deficits
+
+credit_score, applicant_deficits = calculate_score_and_deficits(active_row)
+
+# ==============================================================================
+# 5. PAGE CONTENT ROUTING
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# PAGE 1: EXECUTIVE SUMMARY
+# ------------------------------------------------------------------------------
+if nav_page == "📊 Executive Summary":
+    st.title("💳 CrediXAI | Underwriting Executive Summary")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.markdown(f'<div class="metric-card"><div class="metric-title">Applicant</div><div class="metric-value">{active_row["name"]}</div><small style="color:#8b949e !important;">ID: {active_row["id"]}</small></div>', unsafe_allow_html=True)
+    with col2:
+        st.markdown(f'<div class="metric-card"><div class="metric-title">Household Income</div><div class="metric-value">Rs. {int(total_household_income):,}</div><small style="color:#8b949e !important;">Personal: Rs. {int(active_row["personal_income"]):,}</small></div>', unsafe_allow_html=True)
+    with col3:
+        st.markdown(f'<div class="metric-card"><div class="metric-title">CrediXAI Score</div><div class="metric-value">{credit_score} <small style="font-size:0.8rem; color:#8b949e !important;">/ 900</small></div></div>', unsafe_allow_html=True)
+    with col4:
+        st.markdown(f'<div class="metric-card"><div class="metric-title">Max Eligible Loan</div><div class="metric-value" style="color:#3fb950 !important;">Rs. {int(max_loan_principal):,}</div></div>', unsafe_allow_html=True)
 
     st.markdown("---")
-    res_col1, res_col2 = st.columns(2)
-    with res_col1:
-        st.metric("Current Score", f"{score}/100")
-    with res_col2:
-        st.metric("Projected Score", f"{sim_score}/100", delta=f"{delta} points", delta_color="normal")
+    st.markdown("### 📈 Live Performance Metrics Overview")
+    st.info("Use the sidebar menu to navigate to specific modules like the Deficit & Gap Analyzer, FOIR Waterfall, or Active Loans.")
 
-    if sim_score >= 75 and score < 75:
-        st.success("🎉 Path to Approval: Reaching these simulated targets elevates the borrower to Auto-Approved tier!")
-    elif sim_score < 50:
-        st.warning("⚠️ Warning: Projected targets maintain high credit default risk.")
-    st.markdown('</div>', unsafe_allow_html=True)
+# ------------------------------------------------------------------------------
+# PAGE 2: BORROWER DETAILS & PROFILE
+# ------------------------------------------------------------------------------
+elif nav_page == "👤 Borrower Details & Profile":
+    st.title("👤 Borrower Profile & Live Settings")
+    st.markdown("Edit or inspect full profile attributes for the current applicant. Changes update the database in real time.")
 
-# --- MODULE 5: AI COPILOT CHATBOT ---
-elif nav_choice == "🤖 AI Copilot Chatbot":
-    st.markdown("## 🤖 CrediBot • AI Underwriting Copilot")
-    st.caption(f"Intelligent Assistant evaluating profile for **{active_b['name']}** ({active_b['id']})")
+    with st.form("edit_borrower_form"):
+        col_b1, col_b2 = st.columns(2)
+        with col_b1:
+            e_name = st.text_input("Applicant Full Name", value=active_row['name'])
+            e_id = st.text_input("Applicant ID", value=active_row['id'])
+            e_pan = st.text_input("Identity / Document Ref", value=active_row['pan'])
+            
+            cat_options = ["🛒 Micro Merchant / Street Vendor", "Gig Economy Worker", "Salaried", "Self-Employed", "Freelancer"]
+            cat_idx = cat_options.index(active_row['category']) if active_row['category'] in cat_options else 0
+            e_cat = st.selectbox("Employment Category", cat_options, index=cat_idx)
+            
+            e_p_inc = st.number_input("Personal Monthly Income (Rs.)", value=float(active_row['personal_income']), step=1000.0)
 
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    
-    for msg in st.session_state.chat_messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+        with col_b2:
+            e_f_inc = st.number_input("Family / Co-Applicant Income (Rs.)", value=float(active_row['family_income']), step=1000.0)
+            e_debts = st.number_input("Existing Monthly EMIs (Rs.)", value=float(active_row['monthly_debts']), step=500.0)
+            e_upi = st.slider("Monthly UPI Transaction Count", 0, 200, value=int(active_row['upi_count']))
+            e_util = st.slider("Utility Bill Payment Score", 0, 100, value=int(active_row['utility_status']))
+            e_vol = st.slider("Earnings Volatility Index (%)", 0, 100, value=int(active_row['volatility']))
 
-    if user_prompt := st.chat_input("Ask about score logic, RBI rules, or applicant recommendations..."):
-        st.session_state.chat_messages.append({"role": "user", "content": user_prompt})
-        with st.chat_message("user"):
-            st.markdown(user_prompt)
+        submit_btn = st.form_submit_button("Save & Update Applicant Profile 💾")
+        if submit_btn:
+            updated_data = {
+                'id': e_id, 'name': e_name, 'category': e_cat, 'pan': e_pan,
+                'personal_income': e_p_inc, 'family_income': e_f_inc, 'monthly_debts': e_debts,
+                'upi_count': e_upi, 'utility_status': e_util, 'volatility': e_vol
+            }
+            update_applicant_db(updated_data)
+            st.success(f"Profile updated successfully for {e_name} in live database!")
+            st.rerun()
 
-        score, _ = calculate_score_breakdown(active_b)
-        prompt_lower = user_prompt.lower()
+# ------------------------------------------------------------------------------
+# PAGE 3: APPLICATION JOURNEY
+# ------------------------------------------------------------------------------
+elif nav_page == "📱 Application Journey":
+    st.title("📲 Borrower Digital Application Journey")
+    stages = ["1. KYC Verification", "2. Select Loan Terms", "3. KFS & E-Sign", "4. Instant Disbursal"]
+    selected_stage = st.radio("Journey Stage:", stages, horizontal=True)
 
-        if "score" in prompt_lower or "why" in prompt_lower:
-            reply = f"**{active_b['name']}** currently holds a score of **{score}/100**. Their high UPI velocity ({active_b['upi_count']} txns) and monthly income (₹{active_b['monthly_income']:,}) drive positive points, while ₹{active_b['monthly_debts']:,} existing debt creates a minor penalty."
-        elif "rbi" in prompt_lower or "compliance" in prompt_lower or "privacy" in prompt_lower:
-            reply = "CrediXAI adheres strictly to the **RBI Fair Practices Code**. We access data through the Account Aggregator (AA) consent framework and never scrape private contacts, SMS, or media files."
-        elif "recommend" in prompt_lower or "approve" in prompt_lower:
-            if score >= 75:
-                reply = f"**{active_b['name']}** is **Auto-Approved** for credit up to ₹75,000 at 12% APR due to strong cash-flow stability."
-            elif score >= 50:
-                reply = f"**{active_b['name']}** qualifies for a micro-loan of ₹25,000 subject to manual re-verification of bank records."
-            else:
-                reply = f"**{active_b['name']}** is declined due to high debt relative to cash reserves. Recommend 60 days of debt reduction."
+    st.markdown("---")
+    if selected_stage == "1. KYC Verification":
+        st.markdown("### Step 1: Digital Identity Verification")
+        st.text_input("Verified Full Name", value=str(active_row['name']), disabled=True)
+        st.text_input("Identity Number / Document Ref", value=str(active_row['pan']), disabled=True)
+        st.checkbox("Account Aggregator (AA) Consent Verified & Active", value=True, disabled=True)
+
+    elif selected_stage == "2. Select Loan Terms":
+        st.markdown("### Step 2: Custom Loan Configuration")
+        if max_loan_principal > 5000:
+            loan_amt = st.slider("Requested Principal (Rs.)", 5000, int(max_loan_principal), int(min(25000, max_loan_principal)), 1000)
+            tenure = st.selectbox("Tenure (Months)", [3, 6, 9, 12])
+            calc_emi = (loan_amt * monthly_r * ((1 + monthly_r)**tenure)) / (((1 + monthly_r)**tenure) - 1)
+            st.success(f"Estimated Monthly EMI: **Rs. {calc_emi:,.2f}** for {tenure} months.")
         else:
-            reply = f"I am monitoring **{active_b['name']}**'s parameters. Their Account Aggregator status is {'ACTIVE' if active_b.get('aa_verified') else 'PENDING'}. Feel free to ask about score components, RBI rules, or loan options!"
+            st.warning("Credit capacity is insufficient for new loans.")
 
-        with st.chat_message("assistant"):
-            st.markdown(reply)
-        st.session_state.chat_messages.append({"role": "assistant", "content": reply})
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# --- MODULE 6: ALGORITHMIC FAIRNESS ---
-elif nav_choice == "⚖️ Algorithmic Fairness":
-    st.markdown("## ⚖️ Algorithmic Fairness & Bias Auditing")
-    st.caption("Monitoring demographic parity and model fairness metrics")
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown('<div class="metric-pill"><div class="metric-val">0.01</div><div class="metric-lbl">Demographic Parity Delta</div></div>', unsafe_allow_html=True)
-    with c2:
-        st.markdown('<div class="metric-pill"><div class="metric-val">99.8%</div><div class="metric-lbl">Equal Opportunity Score</div></div>', unsafe_allow_html=True)
-    with c3:
-        st.markdown('<div class="metric-pill"><div class="metric-val">0.00</div><div class="metric-lbl">Gender Disparity Ratio</div></div>', unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("""
-    <div class="glass-card">
-        <h3 style="color: #3fb950 !important; margin-top: 0;">🛡️ Fair Lending Standard</h3>
-        <p style="color: #e6edf3 !important; font-size: 14px; line-height: 1.6;">
-            CrediXAI ensures protected demographic attributes do not skew evaluation outcomes. Underwriting decisions rely strictly on cash-flow discipline and verified financial transactions.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-
-# --- MODULE 7: REGULATORY AUDIT LOG ---
-elif nav_choice == "📋 Regulatory Audit Log":
-    st.markdown("## 📋 Regulatory Compliance & Audit Log")
-    st.caption("Immutable record of system parameters for compliance verification")
-
-    audit_table = pd.DataFrame({
-        "Audit Parameter": [
-            "Assessment Timestamp",
-            "Applicant Token ID",
-            "Account Aggregator Status",
-            "Consent Framework Status",
-            "Contact Scraping Enforced?",
-            "Media/SMS Access Enforced?",
-            "Model Version",
-            "RBI Compliance Status"
-        ],
-        "System Log Value": [
-            datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S IST"),
-            f"HASH-{active_b['id']}",
-            "VERIFIED ACTIVE ✅" if active_b.get('aa_verified') else "PENDING CONSENT ⚠️",
-            "EXPLICIT_OPT_IN_VERIFIED ✅",
-            "NO (Disabled by Protocol)",
-            "NO (Disabled by Protocol)",
-            "CrediXAI-InterpretableTree-v2.4",
-            "FULLY COMPLIANT ✅"
+    elif selected_stage == "3. KFS & E-Sign":
+        st.markdown("### Step 3: Key Fact Statement (KFS) & RBI Regulatory Norms")
+        st.markdown("This Key Fact Statement is generated in compliance with **RBI Digital Lending Guidelines (2022/2026)**.")
+        
+        kfs_data = [
+            {"Parameter": "Sanctioned Loan Amount", "Details": "Rs. 25,000.00"},
+            {"Parameter": "Disbursal Amount (Net)", "Details": "Rs. 24,500.00 (After Rs. 500 Processing Fee)"},
+            {"Parameter": "Interest Rate (Reducing Balance)", "Details": "14.0% per annum"},
+            {"Parameter": "Annual Percentage Rate (APR)", "Details": "15.8% (Includes interest, fee, and charges)"},
+            {"Parameter": "Tenure of Loan", "Details": "12 Months"},
+            {"Parameter": "Number of Repayment Installments", "Details": "12 Monthly Installments"},
+            {"Parameter": "Monthly EMI Amount", "Details": "Rs. 2,244.60"},
+            {"Parameter": "Total Repayment Amount", "Details": "Rs. 26,935.20"},
+            {"Parameter": "Total Interest Payable", "Details": "Rs. 1,935.20"},
+            {"Parameter": "Penal Interest / Overdue Fee", "Details": "2.0% per month on overdue EMI amount"},
+            {"Parameter": "Cooling-Off / Look-Up Period", "Details": "3 Business Days (Exit without penalty)"},
+            {"Parameter": "Grievance Redressal Officer (GRO)", "Details": "gro@credixai.in | +91-1800-123-4567"}
         ]
-    })
+        st.table(pd.DataFrame(kfs_data))
 
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.table(audit_table)
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("#### 📜 Mandatory Regulatory Declarations")
+        st.markdown("""
+        * **No Automatic Limit Increases:** Credit limits will not be enhanced without explicit prior written consent.
+        * **Direct Account Disbursement:** Funds will be disbursed directly to the borrower's verified bank account without third-party involvement.
+        * **Data Privacy Guarantee:** Personal data and transaction logs are processed strictly for credit assessment under AA guidelines and are not stored/sold to third parties.
+        """)
+
+        st.markdown("---")
+        esign_agreed = st.checkbox("✍️ I have read, understood, and digitally sign the Key Fact Statement (KFS) and e-Mandate agreement.", value=True)
+        if esign_agreed:
+            st.success("✅ E-Signature Captured. Token ID: `ESG-99201-XAI`")
+
+    elif selected_stage == "4. Instant Disbursal":
+        st.success("🎉 Disbursement Complete! Loan credited to registered bank account.")
+
+# ------------------------------------------------------------------------------
+# PAGE 4: DEFICIT & GAP ANALYZER
+# ------------------------------------------------------------------------------
+elif nav_page == "⚠️ Deficit & Gap Analyzer":
+    st.title("🔍 Deficit & Criteria Gap Analyzer")
+    st.markdown("Identifies exact criteria holding the applicant back and provides specific solutions to fix them.")
+
+    if applicant_deficits:
+        st.markdown(f'<div class="deficit-box"><h4>⚠️ Found {len(applicant_deficits)} Areas Needing Attention</h4>Below is the exact breakdown of parameters where the applicant missed the optimal benchmark.</div>', unsafe_allow_html=True)
+
+        for d in applicant_deficits:
+            st.markdown(f"❌ **{d['parameter']}** *(Current: {d['current']} | Target: {d['target']})*")
+            st.markdown(f"""
+            <div class="recommendation-box">
+                💡 <b>Strategic Recommendation to Maximize Limit:</b><br/>
+                {d['fix']}
+            </div>
+            """, unsafe_allow_html=True)
+            st.markdown("<br/>", unsafe_allow_html=True)
+    else:
+        st.success("🎉 Excellent! No criteria gaps detected for this profile.")
+
+# ------------------------------------------------------------------------------
+# PAGE 5: FOIR WATERFALL ANALYSIS
+# ------------------------------------------------------------------------------
+elif nav_page == "🧮 FOIR Waterfall Analysis":
+    st.title("🧮 Fixed Obligation to Income Ratio (FOIR) Waterfall")
+    
+    col_w1, col_w2 = st.columns(2)
+    with col_w1:
+        waterfall_df = [
+            {"Step": "1. Personal Monthly Income", "Amount (Rs.)": f"Rs. {active_row['personal_income']:,.2f}"},
+            {"Step": "2. Family/Co-Applicant Income", "Amount (Rs.)": f"+ Rs. {active_row['family_income']:,.2f}"},
+            {"Step": "3. Total Household Income", "Amount (Rs.)": f"Rs. {total_household_income:,.2f}"},
+            {"Step": "4. Mandatory Living Exp (-30%)", "Amount (Rs.)": f"- Rs. {living_expenses:,.2f}"},
+            {"Step": "5. Existing Household EMIs", "Amount (Rs.)": f"- Rs. {active_row['monthly_debts']:,.2f}"},
+            {"Step": "6. Net Disposable Income", "Amount (Rs.)": f"Rs. {net_disposable_income:,.2f}"},
+            {"Step": "7. Max Allowed EMI (80% Cap)", "Amount (Rs.)": f"Rs. {max_eligible_emi:,.2f}"}
+        ]
+        st.table(pd.DataFrame(waterfall_df))
+
+    with col_w2:
+        fig_waterfall = go.Figure(go.Waterfall(
+            orientation="v",
+            measure=["absolute", "relative", "total", "relative", "relative", "total"],
+            x=["Personal Inc", "Family Inc", "Total Household", "Living Exp", "Existing EMIs", "Net Disposable"],
+            y=[active_row['personal_income'], active_row['family_income'], total_household_income, -living_expenses, -active_row['monthly_debts'], net_disposable_income],
+            connector={"line": {"color": "#8b949e"}},
+            decreasing={"marker": {"color": "#f85149"}},
+            increasing={"marker": {"color": "#2ea44f"}},
+            totals={"marker": {"color": "#388bfd"}}
+        ))
+        fig_waterfall.update_layout(title="Household Cashflow (Rs.)", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#ffffff'))
+        st.plotly_chart(fig_waterfall, use_container_width=True)
+
+# ------------------------------------------------------------------------------
+# PAGE 6: ACTIVE LOANS & REPAYMENTS (ENCODING FIXES APPLIED)
+# ------------------------------------------------------------------------------
+elif nav_page == "📊 Active Loans & Repayments":
+    st.title("📊 Active Loan Management & Repayments")
+    st.markdown("Track active loans, upcoming EMI schedules, and direct one-click payments.")
+
+    loans_data = [
+        {"Loan ID": "LN-2025-88", "Lender": "FinServe Digital", "Sanctioned": "Rs. 30,000", "Outstanding": "Rs. 12,400", "Next EMI Due": "05 Aug 2026", "EMI Amount": "Rs. 2,650", "Status": "Active"},
+        {"Loan ID": "LN-2024-12", "Lender": "FlexiCredit", "Sanctioned": "Rs. 15,000", "Outstanding": "Rs. 0", "Next EMI Due": "N/A", "EMI Amount": "Rs. 0", "Status": "Closed"}
+    ]
+    st.table(pd.DataFrame(loans_data))
+
+    st.markdown("---")
+    col_p1, col_p2 = st.columns(2)
+
+    with col_p1:
+        st.markdown("### Pay Upcoming EMI")
+        pay_amt = st.number_input("Payment Amount (Rs.)", value=2650)
+        pay_method = st.selectbox("Payment Method", ["UPI (Google Pay / PhonePe)", "Net Banking", "Debit Card"])
+        if st.button("Pay EMI Now 💳"):
+            st.success(f"✅ Payment of Rs. {pay_amt} successful via {pay_method}!")
+
+    with col_p2:
+        st.markdown("### Download Documents")
+        
+        # HTML Template with UTF-8 Meta Tag & Standard Rupee Notation
+        assessment_report_html = f"""
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 30px; color: #111; }}
+                .header {{ text-align: center; border-bottom: 2px solid #2ea44f; padding-bottom: 10px; }}
+                .section {{ margin-top: 20px; background: #f8f9fa; padding: 15px; border-radius: 8px; }}
+                .metric {{ font-size: 20px; font-weight: bold; color: #0d4429; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
+                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+                th {{ background-color: #2ea44f; color: white; }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h2>CREDIXAI UNDERWRITING ASSESSMENT REPORT</h2>
+                <p>Official Institutional Record • Generated on 2026-08-04 22:30:00 IST</p>
+            </div>
+            <div class="section">
+                <h3>Applicant Details</h3>
+                <p><b>Name:</b> {active_row['name']} | <b>ID:</b> {active_row['id']} | <b>Category:</b> {active_row['category']}</p>
+                <p><b>AA Consent Verification:</b> VERIFIED ACTIVE</p>
+            </div>
+            <div class="section">
+                <h3>Underwriting Decision</h3>
+                <p class="metric">Credit Score: {credit_score}/900</p>
+                <p><b>Recommendation:</b> Approved for Instant Credit Line up to Rs. {int(max_loan_principal):,} at 14% APR</p>
+            </div>
+            <div class="section">
+                <h3>Financial Signals Overview</h3>
+                <table>
+                    <tr><th>Financial Attribute</th><th>Evaluated Value</th></tr>
+                    <tr><td>Monthly Income</td><td>Rs. {int(active_row['personal_income']):,}</td></tr>
+                    <tr><td>UPI Transactions</td><td>{active_row['upi_count']} / month</td></tr>
+                    <tr><td>Utility Status</td><td>{active_row['utility_status']}% On-Time</td></tr>
+                    <tr><td>Average Balance</td><td>Rs. {int(net_disposable_income):,}</td></tr>
+                    <tr><td>Debt Obligations</td><td>Rs. {int(active_row['monthly_debts']):,}</td></tr>
+                </table>
+            </div>
+        </body>
+        </html>
+        """
+        
+        pdf_bytes = create_styled_pdf_bytes(assessment_report_html)
+        
+        st.download_button(
+            label="📄 Download Assessment Report (PDF)",
+            data=pdf_bytes,
+            file_name=f"CrediXAI_Assessment_{active_row['id']}.pdf",
+            mime="application/pdf"
+        )
+
+# ------------------------------------------------------------------------------
+# PAGE 7: AI COPILOT CHATBOT
+# ------------------------------------------------------------------------------
+elif nav_page == "🤖 AI Copilot Chatbot":
+    st.title("🤖 CrediBot | Underwriting Copilot")
+    st.markdown("Ask CrediBot policy, eligibility, or risk management queries.")
+
+    if 'chat_history' not in st.session_state:
+        st.session_state.chat_history = []
+
+    api_key_input = st.text_input("Gemini API Key (Optional)", type="password")
+
+    for message in st.session_state.chat_history:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    if user_query := st.chat_input("Ask CrediBot a question..."):
+        st.session_state.chat_history.append({"role": "user", "content": user_query})
+        with st.chat_message("user"):
+            st.markdown(user_query)
+
+        if api_key_input and GENAI_AVAILABLE:
+            try:
+                client = genai.Client(api_key=api_key_input)
+                prompt = f"Applicant {active_row['name']} ({active_row['id']}), Score: {credit_score}. User question: {user_query}"
+                response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+                with st.chat_message("assistant"):
+                    st.markdown(response.text)
+                    st.session_state.chat_history.append({"role": "assistant", "content": response.text})
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
+        else:
+            with st.chat_message("assistant"):
+                ans = f"**CrediBot:** Applicant **{active_row['name']}** currently has a credit score of **{credit_score}/900** with an eligible loan principal cap of **Rs. {int(max_loan_principal):,}**."
+                st.markdown(ans)
+                st.session_state.chat_history.append({"role": "assistant", "content": ans})
