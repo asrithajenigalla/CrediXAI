@@ -240,8 +240,8 @@ def calculate_score_and_deficits(b_data):
             "fix": "Link verified bank statements covering 6 continuous months to prove consistent income."
         })
 
-    # Updated scale to cap out at 1000 instead of 900
-    score = int(np.clip(base + (60 if b_data['utility_status']>=80 else -50) + (50 if b_data['upi_count']>=60 else -40), 300, 1000))
+    # Credit Score capped at 950
+    score = int(np.clip(base + (50 if b_data['utility_status']>=80 else -40) + (40 if b_data['upi_count']>=60 else -30), 300, 950))
     return score, deficits
 
 credit_score, applicant_deficits = calculate_score_and_deficits(active_row)
@@ -262,7 +262,7 @@ if nav_page == "📊 Executive Summary":
     with col2:
         st.markdown(f'<div class="metric-card"><div class="metric-title">Household Income</div><div class="metric-value">Rs. {int(total_household_income):,}</div><small style="color:#8b949e !important;">Personal: Rs. {int(active_row["personal_income"]):,}</small></div>', unsafe_allow_html=True)
     with col3:
-        st.markdown(f'<div class="metric-card"><div class="metric-title">CrediXAI Score</div><div class="metric-value">{credit_score} <small style="font-size:0.8rem; color:#8b949e !important;">/ 1000</small></div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card"><div class="metric-title">CrediXAI Score</div><div class="metric-value">{credit_score} <small style="font-size:0.8rem; color:#8b949e !important;">/ 950</small></div></div>', unsafe_allow_html=True)
     with col4:
         st.markdown(f'<div class="metric-card"><div class="metric-title">Max Eligible Loan</div><div class="metric-value" style="color:#3fb950 !important;">Rs. {int(max_loan_principal):,}</div></div>', unsafe_allow_html=True)
 
@@ -326,7 +326,6 @@ elif nav_page == "📱 Application Journey":
         st.markdown("### Step 2: Custom Loan Configuration")
         if max_loan_principal > 5000:
             loan_amt = st.slider("Requested Principal (Rs.)", 5000, int(max_loan_principal), int(min(25000, max_loan_principal)), 1000)
-            # Expanded Tenure Options up to 36 Months
             tenure = st.selectbox("Tenure (Months)", [3, 6, 9, 12, 18, 24, 36])
             calc_emi = (loan_amt * monthly_r * ((1 + monthly_r)**tenure)) / (((1 + monthly_r)**tenure) - 1)
             st.success(f"Estimated Monthly EMI: **Rs. {calc_emi:,.2f}** for {tenure} months.")
@@ -476,7 +475,7 @@ elif nav_page == "📊 Active Loans & Repayments":
             </div>
             <div class="section">
                 <h3>Underwriting Decision</h3>
-                <p class="metric">Credit Score: {credit_score}/1000</p>
+                <p class="metric">Credit Score: {credit_score}/950</p>
                 <p><b>Recommendation:</b> Approved for Instant Credit Line up to Rs. {int(max_loan_principal):,} at 14% APR</p>
             </div>
             <div class="section">
@@ -536,6 +535,6 @@ elif nav_page == "🤖 AI Copilot Chatbot":
                 st.error(f"Error: {str(e)}")
         else:
             with st.chat_message("assistant"):
-                ans = f"**CrediBot:** Applicant **{active_row['name']}** currently has a credit score of **{credit_score}/1000** with an eligible loan principal cap of **Rs. {int(max_loan_principal):,}**."
+                ans = f"**CrediBot:** Applicant **{active_row['name']}** currently has a credit score of **{credit_score}/950** with an eligible loan principal cap of **Rs. {int(max_loan_principal):,}**."
                 st.markdown(ans)
                 st.session_state.chat_history.append({"role": "assistant", "content": ans})
