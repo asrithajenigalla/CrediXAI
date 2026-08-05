@@ -15,6 +15,22 @@ except ImportError:
     GENAI_AVAILABLE = False
 
 # ==============================================================================
+# EXPANDED CATEGORY OPTIONS
+# ==============================================================================
+EMPLOYMENT_CATEGORIES = [
+    "🛒 Micro Merchant / Street Vendor",
+    "🛵 Gig Economy Worker / Delivery Partner",
+    "💼 Salaried (Private Sector)",
+    "🏛️ Salaried (Government)",
+    "💻 Freelancer / Digital Nomad",
+    "🩺 Self-Employed Professional (Doctor/CA/Lawyer)",
+    "🏬 Small Business Owner / Kirana Store",
+    "🌾 Agricultural / Allied Activities",
+    "🎓 Student with Part-time Income",
+    "🏠 Unemployed / Seeking Work"
+]
+
+# ==============================================================================
 # HELPER: STYLED PDF GENERATOR USING XHTML2PDF
 # ==============================================================================
 def create_styled_pdf_bytes(html_content: str) -> bytes:
@@ -85,8 +101,8 @@ def init_db():
     if c.fetchone()[0] == 0:
         sample_data = [
             ("APP-8112-IN", "Priya Sundaram", "🛒 Micro Merchant / Street Vendor", "XYZPS9876K", 48000.0, 15000.0, 4500.0, 142, 100, 10),
-            ("APP-9204-IN", "Rahul Sharma", "Gig Economy Worker", "ABCDE1234F", 35000.0, 20000.0, 6000.0, 110, 78, 22),
-            ("APP-3341-IN", "Anil Kumar", "Freelancer", "PQRST5543M", 28000.0, 0.0, 4500.0, 45, 65, 38)
+            ("APP-9204-IN", "Rahul Sharma", "🛵 Gig Economy Worker / Delivery Partner", "ABCDE1234F", 35000.0, 20000.0, 6000.0, 110, 78, 22),
+            ("APP-3341-IN", "Anil Kumar", "💻 Freelancer / Digital Nomad", "PQRST5543M", 28000.0, 0.0, 4500.0, 45, 65, 38)
         ]
         c.executemany("INSERT INTO applicants VALUES (?,?,?,?,?,?,?,?,?,?)", sample_data)
         conn.commit()
@@ -131,8 +147,7 @@ if user_action == "➕ Register New Applicant":
         new_name = st.text_input("Full Name")
         new_id = f"APP-{np.random.randint(1000, 9999)}-IN"
         new_pan = st.text_input("PAN / ID Ref")
-        cat_options = ["🛒 Micro Merchant / Street Vendor", "Gig Economy Worker", "Salaried", "Self-Employed", "Freelancer"]
-        new_cat = st.selectbox("Category", cat_options)
+        new_cat = st.selectbox("Category", EMPLOYMENT_CATEGORIES)
         new_p_inc = st.number_input("Monthly Income (Rs.)", value=25000.0, step=1000.0)
         new_f_inc = st.number_input("Family Income (Rs.)", value=0.0, step=1000.0)
         new_debts = st.number_input("Monthly EMIs (Rs.)", value=2000.0, step=500.0)
@@ -190,7 +205,7 @@ else:
     max_loan_principal = 0
 
 def calculate_score_and_deficits(b_data):
-    base = 600
+    base = 650
     deficits = []
     
     tot_inc = b_data['personal_income'] + b_data['family_income']
@@ -225,7 +240,8 @@ def calculate_score_and_deficits(b_data):
             "fix": "Link verified bank statements covering 6 continuous months to prove consistent income."
         })
 
-    score = int(np.clip(base + (40 if b_data['utility_status']>=80 else -40) + (30 if b_data['upi_count']>=60 else -30), 300, 900))
+    # Updated scale to cap out at 1000 instead of 900
+    score = int(np.clip(base + (60 if b_data['utility_status']>=80 else -50) + (50 if b_data['upi_count']>=60 else -40), 300, 1000))
     return score, deficits
 
 credit_score, applicant_deficits = calculate_score_and_deficits(active_row)
@@ -246,7 +262,7 @@ if nav_page == "📊 Executive Summary":
     with col2:
         st.markdown(f'<div class="metric-card"><div class="metric-title">Household Income</div><div class="metric-value">Rs. {int(total_household_income):,}</div><small style="color:#8b949e !important;">Personal: Rs. {int(active_row["personal_income"]):,}</small></div>', unsafe_allow_html=True)
     with col3:
-        st.markdown(f'<div class="metric-card"><div class="metric-title">CrediXAI Score</div><div class="metric-value">{credit_score} <small style="font-size:0.8rem; color:#8b949e !important;">/ 900</small></div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card"><div class="metric-title">CrediXAI Score</div><div class="metric-value">{credit_score} <small style="font-size:0.8rem; color:#8b949e !important;">/ 1000</small></div></div>', unsafe_allow_html=True)
     with col4:
         st.markdown(f'<div class="metric-card"><div class="metric-title">Max Eligible Loan</div><div class="metric-value" style="color:#3fb950 !important;">Rs. {int(max_loan_principal):,}</div></div>', unsafe_allow_html=True)
 
@@ -268,9 +284,8 @@ elif nav_page == "👤 Borrower Details & Profile":
             e_id = st.text_input("Applicant ID", value=active_row['id'])
             e_pan = st.text_input("Identity / Document Ref", value=active_row['pan'])
             
-            cat_options = ["🛒 Micro Merchant / Street Vendor", "Gig Economy Worker", "Salaried", "Self-Employed", "Freelancer"]
-            cat_idx = cat_options.index(active_row['category']) if active_row['category'] in cat_options else 0
-            e_cat = st.selectbox("Employment Category", cat_options, index=cat_idx)
+            cat_idx = EMPLOYMENT_CATEGORIES.index(active_row['category']) if active_row['category'] in EMPLOYMENT_CATEGORIES else 0
+            e_cat = st.selectbox("Employment Category", EMPLOYMENT_CATEGORIES, index=cat_idx)
             
             e_p_inc = st.number_input("Personal Monthly Income (Rs.)", value=float(active_row['personal_income']), step=1000.0)
 
@@ -311,7 +326,8 @@ elif nav_page == "📱 Application Journey":
         st.markdown("### Step 2: Custom Loan Configuration")
         if max_loan_principal > 5000:
             loan_amt = st.slider("Requested Principal (Rs.)", 5000, int(max_loan_principal), int(min(25000, max_loan_principal)), 1000)
-            tenure = st.selectbox("Tenure (Months)", [3, 6, 9, 12])
+            # Expanded Tenure Options up to 36 Months
+            tenure = st.selectbox("Tenure (Months)", [3, 6, 9, 12, 18, 24, 36])
             calc_emi = (loan_amt * monthly_r * ((1 + monthly_r)**tenure)) / (((1 + monthly_r)**tenure) - 1)
             st.success(f"Estimated Monthly EMI: **Rs. {calc_emi:,.2f}** for {tenure} months.")
         else:
@@ -408,7 +424,7 @@ elif nav_page == "🧮 FOIR Waterfall Analysis":
         st.plotly_chart(fig_waterfall, use_container_width=True)
 
 # ------------------------------------------------------------------------------
-# PAGE 6: ACTIVE LOANS & REPAYMENTS (ENCODING FIXES APPLIED)
+# PAGE 6: ACTIVE LOANS & REPAYMENTS
 # ------------------------------------------------------------------------------
 elif nav_page == "📊 Active Loans & Repayments":
     st.title("📊 Active Loan Management & Repayments")
@@ -460,7 +476,7 @@ elif nav_page == "📊 Active Loans & Repayments":
             </div>
             <div class="section">
                 <h3>Underwriting Decision</h3>
-                <p class="metric">Credit Score: {credit_score}/900</p>
+                <p class="metric">Credit Score: {credit_score}/1000</p>
                 <p><b>Recommendation:</b> Approved for Instant Credit Line up to Rs. {int(max_loan_principal):,} at 14% APR</p>
             </div>
             <div class="section">
@@ -520,6 +536,6 @@ elif nav_page == "🤖 AI Copilot Chatbot":
                 st.error(f"Error: {str(e)}")
         else:
             with st.chat_message("assistant"):
-                ans = f"**CrediBot:** Applicant **{active_row['name']}** currently has a credit score of **{credit_score}/900** with an eligible loan principal cap of **Rs. {int(max_loan_principal):,}**."
+                ans = f"**CrediBot:** Applicant **{active_row['name']}** currently has a credit score of **{credit_score}/1000** with an eligible loan principal cap of **Rs. {int(max_loan_principal):,}**."
                 st.markdown(ans)
                 st.session_state.chat_history.append({"role": "assistant", "content": ans})
