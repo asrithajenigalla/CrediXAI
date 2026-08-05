@@ -114,13 +114,48 @@ def update_applicant_db(app_data):
     conn.close()
 
 # ==============================================================================
-# 3. SIDEBAR NAVIGATION & DEMO APPLICANT SELECTOR
+# 3. SIDEBAR NAVIGATION & DEMO APPLICANT SELECTOR / REGISTER FORM
 # ==============================================================================
 st.sidebar.title("⚙️ CrediXAI Engine")
 
 st.sidebar.markdown("### 🗄️ Demo Database Switcher")
 df_apps = get_all_applicants()
-selected_app_id = st.sidebar.selectbox("Select Active Applicant", df_apps['id'].tolist(), index=0)
+
+# Toggle between selecting an existing applicant or creating a new memory space
+user_action = st.sidebar.radio("Database Mode:", ["Select Existing Profile", "➕ Register New Applicant"])
+
+if user_action == "➕ Register New Applicant":
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("New Applicant Entry")
+    with st.sidebar.form("new_applicant_registration_form"):
+        new_name = st.text_input("Full Name")
+        new_id = f"APP-{np.random.randint(1000, 9999)}-IN"
+        new_pan = st.text_input("PAN / ID Ref")
+        cat_options = ["🛒 Micro Merchant / Street Vendor", "Gig Economy Worker", "Salaried", "Self-Employed", "Freelancer"]
+        new_cat = st.selectbox("Category", cat_options)
+        new_p_inc = st.number_input("Monthly Income (Rs.)", value=25000.0, step=1000.0)
+        new_f_inc = st.number_input("Family Income (Rs.)", value=0.0, step=1000.0)
+        new_debts = st.number_input("Monthly EMIs (Rs.)", value=2000.0, step=500.0)
+        new_upi = st.slider("Monthly UPI Txns", 0, 200, value=50)
+        new_util = st.slider("Utility Score", 0, 100, value=80)
+        new_vol = st.slider("Volatility Index (%)", 0, 100, value=15)
+
+        if st.form_submit_button("Save Applicant to Database 💾"):
+            if new_name and new_pan:
+                new_user_data = {
+                    'id': new_id, 'name': new_name, 'category': new_cat, 'pan': new_pan,
+                    'personal_income': new_p_inc, 'family_income': new_f_inc, 'monthly_debts': new_debts,
+                    'upi_count': new_upi, 'utility_status': new_util, 'volatility': new_vol
+                }
+                update_applicant_db(new_user_data)
+                st.sidebar.success(f"Applicant {new_name} created!")
+                st.rerun()
+            else:
+                st.sidebar.error("Full Name and PAN are required.")
+
+    selected_app_id = df_apps['id'].iloc[0]
+else:
+    selected_app_id = st.sidebar.selectbox("Select Active Applicant", df_apps['id'].tolist(), index=0)
 
 active_row = df_apps[df_apps['id'] == selected_app_id].iloc[0].to_dict()
 
