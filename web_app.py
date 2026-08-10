@@ -563,7 +563,7 @@ if nav_page == "📊 Executive Summary":
         """, unsafe_allow_html=True)
 
     # UNIT ECONOMICS & LENDER COST EFFICIENCY
-   st.subheader("💡 Unit Economics & Lender Cost Efficiency")
+st.subheader("💡 Unit Economics & Lender Cost Efficiency")
 
 col1, col2, col3 = st.columns(3)
 
