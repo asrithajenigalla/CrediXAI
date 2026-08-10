@@ -563,18 +563,18 @@ if nav_page == "📊 Executive Summary":
         """, unsafe_allow_html=True)
 
     # UNIT ECONOMICS & LENDER COST EFFICIENCY
-st.subheader("💡 Unit Economics & Lender Cost Efficiency")
+    st.subheader("💡 Unit Economics & Lender Cost Efficiency")
 
-col1, col2, col3 = st.columns(3)
+    col1, col2, col3 = st.columns(3)
 
-with col1:
-    st.metric("Traditional Bureau Cost", "₹250 / check", "Legacy Bureau")
-with col2:
-    st.metric("CrediXAI Access", "Free / Pilot Phase", "Zero Integration Fee")
-with col3:
-    st.metric("Underwriting Speed", "< 1.8 Seconds", "Instant AA Fetch")
+    with col1:
+        st.metric("Traditional Bureau Cost", "₹250 / check", "Legacy Bureau")
+    with col2:
+        st.metric("CrediXAI Access", "Free / Pilot Phase", "Zero Integration Fee")
+    with col3:
+        st.metric("Underwriting Speed", "< 1.8 Seconds", "Instant AA Fetch")
 
-st.caption("⚡ Replaces 3-5 business day manual verification with automated Account Aggregator telemetry.")
+    st.caption("⚡ Replaces 3-5 business day manual verification with automated Account Aggregator telemetry.")
 
     st.markdown("---")
     st.markdown("### 📈 Real-Time Alternative Financial & Gig Signals")
