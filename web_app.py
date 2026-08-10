@@ -895,6 +895,77 @@ elif nav_page == "🛡️ RBI Compliance & AA Payload":
     with l_col3:
         req_rate = st.number_input("Interest Rate (% p.a.)", value=14.0, step=0.5)
 
+# Step 2: Custom Loan Configuration Sliders
+    principal = st.slider(
+        "Requested Principal (Rs.)",
+        min_value=5000,
+        max_value=350000,
+        value=st.session_state.get("loan_principal", 25000),
+        step=1000,
+        key="loan_principal",
+    )
+    
+    tenure = st.selectbox(
+        "Tenure (Months)",
+        options=[3, 6, 12, 18, 24, 36, 48, 60],
+        index=st.session_state.get("loan_tenure_index", 2),
+        key="loan_tenure",
+    )
+    
+    # Loan Calculations (Dynamic)
+    annual_interest_rate = 14.0  # 14% p.a.
+    monthly_rate = (annual_interest_rate / 100) / 12
+    processing_fee = 500.0
+    
+    # EMI Formula: [P x R x (1+R)^N]/[(1+R)^N-1]
+    if monthly_rate > 0:
+        emi = (
+            principal
+            * monthly_rate
+            * ((1 + monthly_rate) ** tenure)
+            / (((1 + monthly_rate) ** tenure) - 1)
+        )
+    else:
+        emi = principal / tenure
+    
+    total_repayment = emi * tenure
+    total_interest = total_repayment - principal
+    net_disbursal = max(0.0, principal - processing_fee)
+    
+    # Step 3: Render Key Fact Statement (KFS) Table dynamically
+    kfs_data = {
+        "Parameter": [
+            "Sanctioned Loan Amount",
+            "Disbursal Amount (Net)",
+            "Interest Rate (Reducing Balance)",
+            "Annual Percentage Rate (APR)",
+            "Tenure of Loan",
+            "Number of Repayment Installments",
+            "Monthly EMI Amount",
+            "Total Repayment Amount",
+            "Total Interest Payable",
+            "Penal Interest / Overdue Fee",
+            "Cooling-Off / Look-Up Period",
+            "Grievance Redressal Officer (GRO)",
+        ],
+        "Details": [
+            f"Rs. {principal:,.2f}",
+            f"Rs. {net_disbursal:,.2f} (After Rs. {processing_fee:,.0f} Processing Fee)",
+            f"{annual_interest_rate}% per annum",
+            f"{annual_interest_rate + 2.0}% (Includes interest, fee, and charges)",
+            f"{tenure} Months",
+            f"{tenure} Monthly Installments",
+            f"Rs. {emi:,.2f}",
+            f"Rs. {total_repayment:,.2f}",
+            f"Rs. {total_interest:,.2f}",
+            "2.0% per month on overdue EMI amount",
+            "3 Business Days (Exit without penalty)",
+            "gro@credixai.in | +91-1800-123-4567",
+        ],
+    }
+    
+    kfs_df = pd.DataFrame(kfs_data)
+    st.table(kfs_df)
     loan_terms = calculate_kfs_terms(req_principal, req_tenure, annual_rate=req_rate)
     
     st.markdown("##### Calculated Loan Details:")
