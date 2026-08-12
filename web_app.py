@@ -229,8 +229,9 @@ def train_credit_models():
     ecom_spend = np.random.uniform(500, 10000, n_samples)
     
     dti = debts / (p_inc + 1e-5)
-    base_score = 650 + (utility * 1.5) + (upi * 0.6) + (io_ratio * 50) + (adb * 0.002) + (gig_days * 2.0) + (gig_rating * 15) - (dti * 250) - (volatility * 3.0)
-    target_score = np.clip(base_score, 300, 950)
+    # Lower base intercept and scale down multipliers for thin-file limits
+    base_score = 520 + (utility * 0.8) + (upi * 0.3) + (io_ratio * 25) + (adb * 0.001) + (gig_days * 1.0) + (gig_rating * 8) - (dti * 150) - (volatility * 1.5)
+    target_score = np.clip(base_score, 300, 750)
     default_label = (target_score < 620).astype(int)
     
     X = pd.DataFrame({
@@ -283,7 +284,8 @@ def evaluate_xai_score(applicant_dict):
         'ecom_monthly_spend': float(applicant_dict.get('ecom_monthly_spend', 2000.0))
     }])
     
-    predicted_score = int(np.clip(gbm_model.predict(X_input)[0], 300, 950))
+    raw_pred = gbm_model.predict(X_input)[0]
+    predicted_score = int(np.clip(raw_pred, 300, 750))
     
     # Calculate Logistic Regression Baseline Probability of Default (Slide 7)
     X_norm = (X_input - X_mean) / (X_std + 1e-5)
@@ -527,7 +529,7 @@ if nav_page == "📊 Executive Summary":
     with col2:
         st.markdown(f'<div class="metric-card"><div class="metric-title">Household Income</div><div class="metric-value">Rs. {int(total_household_income):,}</div><small style="color:#6b7280;">Personal: Rs. {int(active_row["personal_income"]):,}</small></div>', unsafe_allow_html=True)
     with col3:
-        st.markdown(f'<div class="metric-card"><div class="metric-title">XAI Credit Score</div><div class="metric-value">{credit_score} <small style="font-size:0.8rem; color:#6b7280;">/ 950</small></div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card"><div class="metric-title">XAI Credit Score</div><div class="metric-value">{credit_score} <small style="font-size:0.8rem; color:#6b7280;">/ 750</small></div></div>', unsafe_allow_html=True)
     with col4:
         st.markdown(f'<div class="metric-card"><div class="metric-title">Max Loan Limit</div><div class="metric-value" style="color:#16a34a;">Rs. {int(max_loan_principal):,}</div></div>', unsafe_allow_html=True)
 
@@ -600,7 +602,7 @@ elif nav_page == "⚙️ ML Architecture & Dual Model":
     with m_col2:
         st.markdown("#### 2. Comparator Model: Gradient Boosted Trees (GBM)")
         st.markdown("* **Purpose:** Higher predictive power for non-linear alternative data interactions.")
-        st.markdown(f"* **Predicted Credit Score:** `{credit_score} / 950`")
+        st.markdown(f"* **Predicted Credit Score:** `{credit_score} / 750`")
         st.markdown(f"* **Model $R^2$ Variance Score:** `{model_metrics['gbm_r2']}`")
         st.markdown(f"* **Uncertainty Band:** `{confidence_band}`")
 
@@ -886,21 +888,12 @@ elif nav_page == "🛡️ RBI Compliance & AA Payload":
     st.markdown("---")
     st.markdown("### 2. Active Loan Terms & Sanction Overview")
     
-    l_col1, l_col2, l_col3 = st.columns(3)
-    with l_col1:
-        default_principal = float(max(10000.0, max_loan_principal))
-        req_principal = st.number_input("Sanctioned Principal (Rs.)", value=default_principal, step=5000.0)
-    with l_col2:
-        req_tenure = st.selectbox("Tenure", [3, 6, 9, 12, 18, 24, 36], index=3)
-    with l_col3:
-        req_rate = st.number_input("Interest Rate (% p.a.)", value=14.0, step=0.5)
-
-# Step 2: Custom Loan Configuration Sliders
+    # Custom Loan Configuration Controls
     principal = st.slider(
         "Requested Principal (Rs.)",
         min_value=5000,
         max_value=350000,
-        value=st.session_state.get("loan_principal", 25000),
+        value=st.session_state.get("loan_principal", max(10000, int(max_loan_principal))),
         step=1000,
         key="loan_principal",
     )
@@ -912,12 +905,12 @@ elif nav_page == "🛡️ RBI Compliance & AA Payload":
         key="loan_tenure",
     )
     
+    req_rate = st.number_input("Interest Rate (% p.a.)", value=14.0, step=0.5)
+
     # Loan Calculations (Dynamic)
-    annual_interest_rate = 14.0  # 14% p.a.
-    monthly_rate = (annual_interest_rate / 100) / 12
-    processing_fee = 500.0
+    monthly_rate = (req_rate / 100) / 12
+    processing_fee = max(500.0, principal * 0.02)
     
-    # EMI Formula: [P x R x (1+R)^N]/[(1+R)^N-1]
     if monthly_rate > 0:
         emi = (
             principal
@@ -932,7 +925,7 @@ elif nav_page == "🛡️ RBI Compliance & AA Payload":
     total_interest = total_repayment - principal
     net_disbursal = max(0.0, principal - processing_fee)
     
-    # Step 3: Render Key Fact Statement (KFS) Table dynamically
+    # Render Key Fact Statement (KFS) Table dynamically
     kfs_data = {
         "Parameter": [
             "Sanctioned Loan Amount",
@@ -951,8 +944,8 @@ elif nav_page == "🛡️ RBI Compliance & AA Payload":
         "Details": [
             f"Rs. {principal:,.2f}",
             f"Rs. {net_disbursal:,.2f} (After Rs. {processing_fee:,.0f} Processing Fee)",
-            f"{annual_interest_rate}% per annum",
-            f"{annual_interest_rate + 2.0}% (Includes interest, fee, and charges)",
+            f"{req_rate}% per annum",
+            f"{req_rate + 2.0}% (Includes interest, fee, and charges)",
             f"{tenure} Months",
             f"{tenure} Monthly Installments",
             f"Rs. {emi:,.2f}",
@@ -966,7 +959,7 @@ elif nav_page == "🛡️ RBI Compliance & AA Payload":
     
     kfs_df = pd.DataFrame(kfs_data)
     st.table(kfs_df)
-    loan_terms = calculate_kfs_terms(req_principal, req_tenure, annual_rate=req_rate)
+    loan_terms = calculate_kfs_terms(principal, tenure, annual_rate=req_rate)
     
     st.markdown("##### Calculated Loan Details:")
     lc1, lc2, lc3, lc4 = st.columns(4)
@@ -1046,15 +1039,15 @@ elif nav_page == "🤖 AI Copilot Chatbot":
         else:
             query_lower = user_query.lower()
             if "model" in query_lower or "logistic" in query_lower or "gbm" in query_lower:
-                ans = f"CrediXAI employs a **Dual-Model Architecture**: a **Logistic Regression** baseline (PD: `{lr_pd_prob}%`, AUC: `{model_metrics['lr_auc']}`) for auditability, and a **Gradient Boosted Tree** model (Score: **{credit_score}/950**) for handling complex alternative data."
+                ans = f"CrediXAI employs a **Dual-Model Architecture**: a **Logistic Regression** baseline (PD: `{lr_pd_prob}%`, AUC: `{model_metrics['lr_auc']}`) for auditability, and a **Gradient Boosted Tree** model (Score: **{credit_score}/750**) for handling complex alternative data."
             elif "foir" in query_lower:
                 ans = f"CrediXAI calculates a strict FOIR structure. For **{active_row['name']}**, household income is **Rs. {total_household_income:,.2f}**. After a 30% living expense deduction and existing obligations, maximum eligible monthly EMI is capped at **Rs. {max_eligible_emi:,.2f}**."
             elif "cooling" in query_lower or "cooling-off" in query_lower:
                 ans = "In accordance with RBI Digital Lending Guidelines, our engine enforces a mandatory **3-day cooling-off / look-up period**. Borrowers can exit the credit agreement by returning principal without penal charges."
             elif "shap" in query_lower or "xai" in query_lower:
-                ans = f"We use SHAP-style Gradient Boosting attributions. **{active_row['name']}** received an XAI score of **{credit_score}/950**, driven by real-time features such as **{active_row['upi_count']} monthly UPI transactions** and **{active_row['utility_status']}/100 utility payment discipline**."
+                ans = f"We use SHAP-style Gradient Boosting attributions. **{active_row['name']}** received an XAI score of **{credit_score}/750**, driven by real-time features such as **{active_row['upi_count']} monthly UPI transactions** and **{active_row['utility_status']}/100 utility payment discipline**."
             else:
-                ans = f"**CrediXAI Copilot:** Applicant **{active_row['name']}** ({active_row['id']}) holds an XAI score of **{credit_score}/950** with an approved loan ceiling of **Rs. {int(max_loan_principal):,}**."
+                ans = f"**CrediXAI Copilot:** Applicant **{active_row['name']}** ({active_row['id']}) holds an XAI score of **{credit_score}/750** with an approved loan ceiling of **Rs. {int(max_loan_principal):,}**."
 
             with st.chat_message("assistant"):
                 st.markdown(ans)
